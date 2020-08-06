@@ -12,14 +12,18 @@
 #include "GNSS_PPP.h"
 #undef GLOBAL_B2B
 bool gnssinit(const char* ssrfile,const char* outfile) {
+	int i;
 	memset(ssr_orbits,0,sizeof(ssr_orbits));
 	memset(ssr_clocks,0,sizeof(ssr_clocks));
 	memset(ssr_masks,0,sizeof(ssr_masks));
+	memset(ssr_codebias,0,sizeof(ssr_codebias));
 	memset(&ssr_config,0,sizeof(ssr_config));
 	ssr_orbit_count = 0;
 	ssr_clock_count = 0;
 	ssr_mask_count = 0;
-
+	/* initilize the SSR type */
+	for(i = 0; i < IF_MAXSSRTYPE;i++)
+		ssr_codebias[i].SSR = -1;
 	strcpy(ssr_config.CK_FILE[0],ssrfile);
 	strcpy(ssr_config.Machine_number,"sz001");
 	strcpy(ssr_config.Site_number,"BJ03");
@@ -195,7 +199,7 @@ bool b2b_parse_ppp(unsigned char* datapackage,pppdata* PPPB2B){
 	return true;
 }
 int b2b_updateiode(int SSR,int prn,int iodcrc){
-	for(int i = ssr_orbit_count - 1; i >= (ssr_orbit_count - 7 >= 0 ? ssr_orbit_count - 7 : 0);i--){
+	for(int i = ssr_orbit_count - 1; i >= (ssr_orbit_count - 8 >= 0 ? ssr_orbit_count - 8 : 0);i--){
 		if(ssr_orbits[i].SSR != SSR) continue;
 		if(ssr_orbits[i].iodcorr[prn] == iodcrc)
 			return ssr_orbits[i].iode[prn];
@@ -203,7 +207,7 @@ int b2b_updateiode(int SSR,int prn,int iodcrc){
 	return -1;
 }
 void b2b_fillmem(pppdata* p_sbas){
-	int i,prn,ipos,j,nsum,bgot;
+	int i,prn,ipos,j,nsum,bgot,ic;
 	ppp_ssr_orbit *ptr_fill = NULL;
 	ppp_ssr_mask* ptr_mask = NULL;
 	ppp_ssr_clock* ptr_clk = NULL,ssr_clk = {0};;
@@ -226,7 +230,6 @@ void b2b_fillmem(pppdata* p_sbas){
 				ssr_mask_count--;
 			}
 			ptr_mask = ssr_masks + ssr_mask_count++;
-
 			ptr_mask->SSR = p_sbas->SSR;
 			ptr_mask->iodp = p_sbas->type.type1.IODP;
 			memcpy(ptr_mask->cmake,p_sbas->type.type1.prn_make,sizeof(char) * IF_MAXSAT);
@@ -236,7 +239,7 @@ void b2b_fillmem(pppdata* p_sbas){
 		/** orbit information here **/
 		ipos = -1;
 		for(i = 0; i < ssr_orbit_count;i++){
-			if(ssr_orbits[i].SSR != p_sbas->SSR || ssr_orbits[i].bweek != p_sbas->BDSweek || (int)ssr_orbits[i].bsow != p_sbas->BDSsow) continue;
+			if(ssr_orbits[i].SSR != p_sbas->SSR || ssr_orbits[i].bweek != p_sbas->BDSweek || (int)ssr_orbits[i].bsow != (int)p_sbas->BDSsow) continue;
 			ipos = i;
 			break;
 		}
@@ -256,9 +259,7 @@ void b2b_fillmem(pppdata* p_sbas){
 			for(i = 0; i < IF_MAXSAT;i++) ptr_fill->iodcorr[i] = -1; /**initialize the iode here***/
 			for(i = 0; i < IF_MAXSAT;i++) ptr_fill->iode[i] = -1; /**initialize the iode here***/
 			for(i = ssr_orbit_count - 1,nsum = 0; i >= 0;i--){
-				if(ssr_orbits[i].SSR == p_sbas->SSR)
-					if(++nsum == 2)
-						ipos = i;
+				if(ssr_orbits[i].SSR == p_sbas->SSR) if(++nsum == 2) ipos = i; /**do not get the last index,get the last second index**/
 			}
 			if(nsum >= 2) m_outorbit(&ssr_orbits[ipos]);
 		}
@@ -276,12 +277,39 @@ void b2b_fillmem(pppdata* p_sbas){
 		}
 		break;
 	case 3:
+		/***** bias correction here *******/
+		ipos = -1;
+		/* mark the position in the memory */
+		for(i = 0;i < IF_MAXSSRTYPE;i++){
+			if(p_sbas->SSR != ssr_codebias[i].SSR) continue;
+			ipos = i;
+			break;
+		}
+		/* find the position here */
+		if(ipos == -1){
+			for(i = 0;i < IF_MAXSSRTYPE;i++){
+				if(ssr_codebias[i].SSR != -1) continue;
+				ipos = i;
+				break;
+			}
+		}
+		if(ipos != -1){
+			ssr_codebias[ipos].SSR = p_sbas->SSR;
+			/* save the corresponding code bias here */
+			for(i = 0; i < p_sbas->type.type3.num ;i++){
+				prn = p_sbas->type.type3.intersub3[i].satslot - 1;
+				for(ic = 0;ic < p_sbas->type.type3.intersub3[i].num4;ic++){
+					j = p_sbas->type.type3.intersub3[i].pattern[ic];
+					ssr_codebias[ipos].codebias[prn][j] = p_sbas->type.type3.intersub3[i].deciation[ic];
+				}
+			}
+		}
 		break;
 	case 4:
 		/****** clock information *********/
 		ipos = -1;
 		for(i = 0; i < ssr_clock_count;i++){
-			if(ssr_clocks[i].SSR != p_sbas->SSR || ssr_clocks[i].bweek != p_sbas->BDSweek || (int)ssr_clocks[i].bsow != p_sbas->BDSsow) continue; /**not the same configure,the same time**/
+			if(ssr_clocks[i].SSR != p_sbas->SSR || ssr_clocks[i].bweek != p_sbas->BDSweek || (int)ssr_clocks[i].bsow != (int)p_sbas->BDSsow) continue; /**not the same configure,the same time**/
 			ipos = i;
 			break;
 		}
@@ -318,7 +346,7 @@ void b2b_fillmem(pppdata* p_sbas){
 			prn = subtype_prn(ptr_mask->cmake,p_sbas->type.type4.subtupe1,i+1);
 			if(prn == -1) continue;
 			ptr_clk->C0[prn] = p_sbas->type.type4.c[i];
-			if(fabs(fabs(ptr_clk->C0[prn]) - 26.2128) < 0.01) continue;
+			if(fabs(fabs(ptr_clk->C0[prn]) - 26.2128) < 0.01 || fabs(ptr_clk->C0[prn]) < 0.001) continue;
 			ptr_clk->iodcorr[prn] = p_sbas->type.type4.IDO_corr[i];
 			ptr_clk->iode[prn] = b2b_updateiode(ptr_clk->SSR,prn,ptr_clk->iodcorr[prn]);
 		}
@@ -351,6 +379,7 @@ bool b2b_parsecorr(struct Message_header* mh){
 		}
 		mjd2wksow(mjd+i,p_sbas.BDSsod,&p_sbas.BDSweek,&p_sbas.BDSsow);
 		b2b_fillmem(&p_sbas);
+		/**output the log file here**/
 		return true;
 	}
 	return false;
@@ -405,6 +434,7 @@ bool b2b_parse(unsigned char* data){
 	return true;
 }
 void b2b_decoder_file(){
+	int i;
 	FILE* fp = NULL;
 	char line[1024] = {0};
 	if(!(fp = fopen(ssr_config.CK_FILE[0],"r"))){
@@ -417,6 +447,11 @@ void b2b_decoder_file(){
 		memset(line,0,sizeof(line));
 	}
 	fclose(fp);
+	/*** output the code bias here ***/
+	for(i = 0; i < IF_MAXSSRTYPE;i++){
+		if(ssr_codebias[i].SSR == -1) continue;
+		m_outcodebias(&ssr_codebias[i]);
+	}
 }
 int main(int argc,char* args[]){
 	char ssrfile[1024] = {0},outfile[1024] = {0};

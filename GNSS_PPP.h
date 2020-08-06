@@ -12,6 +12,7 @@ typedef signed   long long  INT64S;
 #define IF_MAXSAT 255
 #define IF_MAXSSR 120
 #define IF_MAXMASK 16
+#define IF_MAXSSRTYPE 4
 typedef struct {
 //	char IP[1024];
 //	int Port;
@@ -272,6 +273,10 @@ typedef struct{
 	char cmake[IF_MAXSAT]; /**signal mask collected from type 1**/
 }ppp_ssr_mask;
 
+typedef struct{
+	int SSR;
+	double codebias[IF_MAXSAT][16]; /*code bias for every satellite and different track mode*/
+}ppp_ssr_codebias;
 #ifdef GLOBAL_B2B
 #define GLOBAL_EXTERN
 #else
@@ -284,7 +289,10 @@ GLOBAL_EXTERN int ssr_mask_count;
 GLOBAL_EXTERN ppp_ssr_orbit ssr_orbits[IF_MAXSSR]; /**/
 GLOBAL_EXTERN ppp_ssr_clock ssr_clocks[IF_MAXSSR]; /**/
 GLOBAL_EXTERN ppp_ssr_mask ssr_masks[IF_MAXMASK]; /**/
+GLOBAL_EXTERN ppp_ssr_codebias ssr_codebias[IF_MAXSSRTYPE]; /**/
+/***********************/
 
+/*****************************************/
 unsigned int getbitu(const unsigned char *buff, int pos, int len);
 unsigned int getbitu2(const unsigned char *buff, int p1, int l1, int p2, int l2);
 int getbits2(const unsigned char *buff, int p1, int l1, int p2, int l2);
@@ -311,6 +319,7 @@ bool parse(unsigned char *datapackage);
 int subtype_prn(char* make,int subtype,int ix);
 void m_outorbit(ppp_ssr_orbit* orbit);
 void m_outclock(ppp_ssr_clock* clock);
+void m_outcodebias(ppp_ssr_codebias* codebias);
 int md_julday(int iyear,int imonth,int iday);
 void wksow2mjd(int week,double sow,int* mjd,double* sod);
 void mjd2doy(int jd, int* iyear, int* idoy);

@@ -240,3 +240,39 @@ void m_outclock(ppp_ssr_clock* clock){
 	}
 	fflush(ssr_config.fp_output);
 }
+void m_outcodebias(ppp_ssr_codebias* codebias){
+	int i,isat,idx,gotdata;
+	char filename[1024] = {0},SYS[4] = {"CGRE"},cprn[12] = {0};
+	FILE* fp = NULL;
+	char biascode[4][16][12] = {
+			{"B1I","B1C(d)","B1C(p)","-","B2a(D)","B2a(P)","-","B2b-I","B2b-Q","-","","-","B3I","-","-","-"},
+			{"L1 C/A","L1 P","","","L1C(P)","L1C(D+P)","","L2C(L)","L2C(M+L)","","","L5I","L5Q","L5I+Q","",""},
+			{"G1 C/A","G1 P","G2 C/A","","","","","","","","","","","","",""},
+			{"","E1 B","E1 C","","E5a Q","E5a I","","E5b I","E5b Q","","","E6 C","","","",""}
+	};
+	for(i = 0; i < sizeof(SYS) / sizeof(char);i++){
+		sprintf(filename,"%s_%c_%d","codebias",SYS[i],codebias->SSR);
+		fp = fopen(filename,"w");
+		/* output the header here */
+		fprintf(fp,"%12s"," ");
+		for(idx = 0;idx < 16;idx++){
+			fprintf(fp,"%12s",biascode[i][idx]);
+		}
+		fprintf(fp,"\n");
+		for(isat = 0;isat < IF_MAXSAT;isat++){
+			for(idx = 0,gotdata = 0;idx < 16;idx++){
+				if(codebias->codebias[isat][idx] != 0) gotdata = 1;
+			}
+			if(gotdata != 1) continue;
+			if(SYS[i] != SYS[syssig_prn(isat+1)]) continue;
+			/* output the corresponding code bias here */
+
+			sprintf(cprn,"%c%02d",SYS[syssig_prn(isat + 1)],satslot_prn(isat + 1));
+			fprintf(fp,"%12s",cprn);
+			for(idx = 0;idx < 16;idx++){
+				fprintf(fp,"%12.3lf",codebias->codebias[isat][idx]);
+			}
+			fprintf(fp,"\n");
+		}
+	}
+}
